@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<!-- ヘッダーを設定できない配信先（GitHub Pages 等）でも CSP を効かせるための保険 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>のみログ</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="のみログ">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1c1e">
+
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- ============ カレンダー ============ -->
+<section class="view is-active" id="viewCalendar">
+  <header class="nav">
+    <button class="navbtn" id="prevMonth" aria-label="前の月">‹</button>
+    <button class="monthtitle" id="monthTitleBtn" aria-label="月を選ぶ">
+      <span id="monthTitle">　</span>
+      <svg class="caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 9.5 12 15l5.5-5.5"/></svg>
+    </button>
+    <button class="navbtn" id="nextMonth" aria-label="次の月">›</button>
+  </header>
+
+  <div class="scroll" id="calScroll">
+    <div class="calpanel">
+      <div class="wd">
+        <div>月</div><div>火</div><div>水</div><div>木</div><div>金</div>
+        <div class="sat">土</div><div class="sun">日</div>
+      </div>
+      <div class="grid" id="grid"></div>
+    </div>
+    <div id="summary"></div>
+  </div>
+</section>
+
+<!-- ============ 設定 ============ -->
+<section class="view" id="viewSettings">
+  <header class="nav"><h1>設定</h1></header>
+  <div class="scroll" id="settingsBody"></div>
+</section>
+
+<!-- ============ タブバー ============ -->
+<nav class="tabbar">
+  <button class="tab is-active" data-tab="Calendar">
+    <svg viewBox="0 0 24 24"><path d="M7 2v2H5.5A2.5 2.5 0 0 0 3 6.5v13A2.5 2.5 0 0 0 5.5 22h13a2.5 2.5 0 0 0 2.5-2.5v-13A2.5 2.5 0 0 0 18.5 4H17V2h-2v2H9V2Zm12 8v9.5a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5V10Z"/></svg>
+    <span>カレンダー</span>
+  </button>
+  <button class="tab" data-tab="Settings">
+    <svg viewBox="0 0 24 24"><path d="M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Zm0 2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"/><path d="m10.6 2-.4 2.5q-.8.3-1.5.8L6.4 4.4 4 8.6l1.9 1.6a7 7 0 0 0 0 1.7L4 13.4l2.4 4.2 2.3-.9q.7.5 1.5.8l.4 2.5h4.8l.4-2.5q.8-.3 1.5-.8l2.3.9 2.4-4.2-1.9-1.5a7 7 0 0 0 0-1.7L22 8.6l-2.4-4.2-2.3.9q-.7-.5-1.5-.8L15.4 2Z"/></svg>
+    <span>設定</span>
+  </button>
+</nav>
+
+<!-- ============ 日別入力シート ============ -->
+<div class="backdrop" id="backdrop" hidden></div>
+
+<!-- ============ 月ピッカー ============ -->
+<div class="sheet compact" id="monthSheet" hidden role="dialog" aria-modal="true">
+  <header class="sheethead">
+    <button class="linkbtn" id="monthCancel">キャンセル</button>
+    <b>月を選ぶ</b>
+    <button class="linkbtn strong" id="monthToday">今月へ</button>
+  </header>
+  <div class="sheetscroll">
+    <div class="yearnav">
+      <button id="prevYear" aria-label="前の年">‹</button>
+      <b id="yearLabel"></b>
+      <button id="nextYear" aria-label="次の年">›</button>
+    </div>
+    <div class="monthgrid" id="monthGrid"></div>
+    <p class="hint">点のある月には記録があります。</p>
+  </div>
+</div>
+
+<div class="sheet" id="daySheet" hidden role="dialog" aria-modal="true">
+  <header class="sheethead">
+    <button class="linkbtn" id="daySheetClose">キャンセル</button>
+    <b id="daySheetTitle"></b>
+    <button class="linkbtn strong" id="daySheetSave">保存</button>
+  </header>
+
+  <div class="sheetscroll">
+    <div class="total" id="dayTotal"></div>
+
+    <div class="seg" id="segHangover">
+      <button data-v="none" class="is-on">普通</button>
+      <button data-v="mild">やや二日酔い</button>
+      <button data-v="severe">二日酔い</button>
+    </div>
+
+    <div class="seg" id="segStatus">
+      <button data-v="drank" class="is-on">飲酒した</button>
+      <button data-v="none">飲酒してない</button>
+    </div>
+
+    <div id="drinkArea">
+      <div class="chips" id="catChips"></div>
+      <ul class="list" id="presetList"></ul>
+      <button class="ghost" id="addPresetHere">＋ このカテゴリにお酒を追加</button>
+
+      <h2 class="sechead">内訳がわからないとき</h2>
+      <ul class="list form">
+        <li>
+          <label for="dayManual">純アルコール量 (g)</label>
+          <input id="dayManual" type="text" inputmode="decimal" placeholder="0">
+        </li>
+      </ul>
+      <p class="hint">お酒を1つも選ばなかったときに、この値を合計として使います。</p>
+    </div>
+
+    <h2 class="sechead">メモ</h2>
+    <textarea id="dayMemo" rows="3" placeholder="なぜ飲んだか、誰と飲んだかなど"></textarea>
+
+    <button class="danger" id="dayDelete">この日の記録を削除</button>
+  </div>
+</div>
+
+<!-- ============ プリセット編集シート ============ -->
+<div class="sheet" id="presetSheet" hidden role="dialog" aria-modal="true">
+  <header class="sheethead">
+    <button class="linkbtn" id="presetCancel">キャンセル</button>
+    <b id="presetTitle">お酒を追加</b>
+    <button class="linkbtn strong" id="presetSave">保存</button>
+  </header>
+
+  <div class="sheetscroll">
+    <ul class="list form">
+      <li><label for="pName">名前</label><input id="pName" type="text" placeholder="中ジョッキ"></li>
+      <li><label for="pVol">量 (ml)</label><input id="pVol" type="text" inputmode="decimal" placeholder="400"></li>
+      <li><label for="pAbv">度数 (%)</label><input id="pAbv" type="text" inputmode="decimal" placeholder="5"></li>
+      <li><label for="pCat">カテゴリ</label><select id="pCat"></select></li>
+    </ul>
+
+    <div class="calcbox" id="pCalc"></div>
+
+    <ul class="list form">
+      <li>
+        <label for="pOverride">純アルコール量を手入力</label>
+        <input id="pOverride" type="text" inputmode="decimal" placeholder="自動計算">
+      </li>
+    </ul>
+    <p class="hint">空欄にすると計算式（量 × 度数 ÷ 100 × 0.8）の値を使います。</p>
+
+    <button class="danger" id="presetDelete" hidden>このお酒を削除</button>
+  </div>
+</div>
+
+<!-- ============ カテゴリ編集シート ============ -->
+<div class="sheet" id="catSheet" hidden role="dialog" aria-modal="true">
+  <header class="sheethead">
+    <button class="linkbtn" id="catCancel">キャンセル</button>
+    <b id="catTitle">カテゴリを追加</b>
+    <button class="linkbtn strong" id="catSave">保存</button>
+  </header>
+  <div class="sheetscroll">
+    <ul class="list form">
+      <li><label for="cName">名前</label><input id="cName" type="text" placeholder="ビール"></li>
+      <li><label for="cIcon">アイコン</label><input id="cIcon" type="text" placeholder="🍺" maxlength="4"></li>
+    </ul>
+    <p class="hint">アイコンには絵文字を1文字入れてください。</p>
+    <button class="danger" id="catDelete" hidden>このカテゴリを削除</button>
+  </div>
+</div>
+
+<input type="file" id="importFile" accept=".json,.csv,application/json,text/csv" hidden>
+<div id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
