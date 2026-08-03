@@ -135,6 +135,10 @@ button { font: inherit; color: inherit; background: none; border: none; }
 #settingsBody { padding-left: 14px; padding-right: 14px; }
 #settingsBody > .sechead:first-child { margin-top: 16px; }
 
+/* 月を切り替えるときここごと横に動かす */
+#calScroll { overflow-x: hidden; }
+#calSlide { will-change: transform; }
+
 /* ---------------- カレンダー ---------------- */
 
 .calpanel { background: var(--panel); border-bottom: .5px solid var(--sep); }
@@ -203,12 +207,15 @@ button { font: inherit; color: inherit; background: none; border: none; }
 .big b { font-size: 30px; font-weight: 700; letter-spacing: -.02em; }
 .big span { font-size: 14px; color: var(--text2); }
 
-.bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; margin: 10px 0 12px; }
+.bar { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; margin: 10px 0 8px; }
 .bar i { display: block; height: 100%; border-radius: 4px; transition: width .3s; }
 
+.goal { font-size: 13px; margin-bottom: 13px; }
+
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 16px; font-size: 15px; }
-.stats div { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
-.stats em { font-style: normal; color: var(--text2); font-size: 14px; }
+.stats div { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.stats em { font-style: normal; color: var(--text2); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.stats em i { display: flex; line-height: 0; flex: none; }
 .stats b { font-weight: 600; white-space: nowrap; }
 
 /* ---------------- タブバー ---------------- */

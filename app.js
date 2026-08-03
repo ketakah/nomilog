@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   key: 'settings',
   levels: { moderate: 24, slightlyOver: 40, over: 60 },
   targetRestDays: 15,
+  monthlyTarget: null,              // null なら月の日数から自動計算する
   schemaVersion: 1,
 };
 
@@ -118,9 +119,16 @@ function badSvg(size) {
     <path d="M10.1 16.9H13.9" ${st}/></svg>`;
 }
 
+// 休肝日は淡い塗りの丸に寝顔。ゲージ表示のレベル 1〜3 と一目で区別する
+function restSvg(size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
+    <circle cx="12" cy="12" r="10.4" fill="var(--rest)" opacity=".16"/>
+    ${EYES_SHUT('var(--rest)')}${MOUTH.calm('var(--rest)')}</svg>`;
+}
+
 function levelIcon(lv, g, size = 20) {
   if (lv === 4) return badSvg(size);
-  if (lv === 0) return ringSvg(size, 1, 'var(--rest)', EYES_SHUT('var(--rest)') + MOUTH.calm('var(--rest)'));
+  if (lv === 0) return restSvg(size);
   const c = `var(--lv${lv})`;
   const pct = Math.min(1, g / state.settings.levels.over);
   return ringSvg(size, pct, c, EYES_OPEN(c) + MOUTH[MOUTH_BY_LEVEL[lv]](c));
@@ -234,9 +242,14 @@ const saveSettings = () => idb('meta', 'readwrite', (o) => o.put(state.settings)
    カレンダー
    ============================================================ */
 
-function monthTarget(y, m) {
+function autoMonthTarget(y, m) {
   const dim = new Date(y, m + 1, 0).getDate();
-  return Math.max(0, state.settings.levels.moderate * (dim - state.settings.targetRestDays));
+  return Math.max(0, Math.round(state.settings.levels.moderate * (dim - state.settings.targetRestDays)));
+}
+
+function monthTarget(y, m) {
+  const fixed = state.settings.monthlyTarget;
+  return fixed > 0 ? fixed : autoMonthTarget(y, m);
 }
 
 function renderCalendar() {
@@ -281,8 +294,14 @@ function renderSummary(y, m, dim) {
   const total = recs.reduce((s, r) => s + r.totalGrams, 0);
   const target = monthTarget(y, m);
   const count = (lv) => recs.filter((r) => levelOf(r.totalGrams) === lv).length;
-  const pct = target > 0 ? Math.round((total / target) * 100) : 0;
   const over = total > target;
+  const diff = r1(Math.abs(target - total));
+  const L = state.settings.levels;
+
+  // アイコンを添えてカレンダーの凡例も兼ねる
+  const legend = [[0, 0], [1, L.moderate], [2, L.slightlyOver], [3, L.over], [4, 0]]
+    .map(([lv, g]) => `<div><em><i>${levelIcon(lv, g, 18)}</i>${LEVEL_NAMES[lv]}</em><b>${count(lv)}日</b></div>`)
+    .join('');
 
   $('#summary').innerHTML = `
     <section class="card">
@@ -290,20 +309,46 @@ function renderSummary(y, m, dim) {
       <div class="big"><b>${r1(total)}</b><span>g　/　目標 ${target}g 以内</span></div>
       <div class="bar"><i style="width:${Math.min(100, target > 0 ? (total / target) * 100 : 0)}%;
         background:${over ? 'var(--lv3)' : 'var(--lv1)'}"></i></div>
-      <div class="stats">
-        <div><em>休肝日</em><b>${count(0)}日 / ${esc(state.settings.targetRestDays)}</b></div>
-        <div><em>適量</em><b>${count(1)}日</b></div>
-        <div><em>やや飲み過ぎ</em><b>${count(2)}日</b></div>
-        <div><em>飲み過ぎ</em><b>${count(3)}日</b></div>
-        <div><em>ダメ！</em><b>${count(4)}日</b></div>
-        <div><em>達成率</em><b style="color:${over ? 'var(--lv3)' : 'var(--lv1)'}">${pct}%</b></div>
-      </div>
+      <div class="goal" style="color:${over ? 'var(--lv3)' : 'var(--text2)'}">
+        ${over ? `目標を ${diff}g 超えています` : `目標まで あと ${diff}g`}</div>
+      <div class="stats">${legend}</div>
     </section>`;
 }
 
-function moveMonth(delta) {
-  state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + delta, 1);
-  renderCalendar();
+let sliding = false;
+let dragX = 0;
+
+function moveMonth(delta, fromDrag = false) {
+  if (sliding) return;
+  const el = $('#calSlide');
+  const swap = () => {
+    state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + delta, 1);
+    renderCalendar();
+  };
+  if (!el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.style.transform = '';
+    el.style.opacity = '';
+    swap();
+    return;
+  }
+
+  // 出ていく方向と入ってくる方向をそろえて、指の動きの続きに見せる
+  const shift = Math.min(window.innerWidth, 520) * 0.3;
+  const from = { transform: `translateX(${fromDrag ? dragX : 0}px)`, opacity: el.style.opacity || '1' };
+  sliding = true;
+  el.animate([from, { transform: `translateX(${-delta * shift}px)`, opacity: '0' }],
+    { duration: 130, easing: 'ease-in' }).onfinish = () => {
+    el.style.transform = `translateX(${delta * shift}px)`;
+    el.style.opacity = '0';
+    swap();
+    el.animate([{ transform: `translateX(${delta * shift}px)`, opacity: '0' },
+      { transform: 'translateX(0)', opacity: '1' }],
+    { duration: 230, easing: 'cubic-bezier(.32,.72,0,1)' }).onfinish = () => {
+      el.style.transform = '';
+      el.style.opacity = '';
+      sliding = false;
+    };
+  };
 }
 
 function goMonth(y, m) {
@@ -534,8 +579,12 @@ function renderSettings() {
       <li><label for="sSlight">やや飲み過ぎ (g)</label><input id="sSlight" type="text" inputmode="decimal" value="${esc(L.slightlyOver)}"></li>
       <li><label for="sOver">飲み過ぎ (g)</label><input id="sOver" type="text" inputmode="decimal" value="${esc(L.over)}"></li>
       <li><label for="sRest">目標休肝日 (日/月)</label><input id="sRest" type="text" inputmode="numeric" value="${esc(state.settings.targetRestDays)}"></li>
+      <li><label for="sTarget">月間目標 (g/月)</label><input id="sTarget" type="text" inputmode="decimal"
+        value="${esc(state.settings.monthlyTarget ?? '')}"
+        placeholder="自動 (${esc(autoMonthTarget(state.cursor.getFullYear(), state.cursor.getMonth()))}g)"></li>
     </ul>
-    <p class="hint">上限を超えると次のレベルになります。月間目標は「適量の上限 ×（月の日数 − 目標休肝日）」で計算します。<br>
+    <p class="hint">上限を超えると次のレベルになります。<br>
+      月間目標を空欄にすると「適量の上限 ×（月の日数 − 目標休肝日）」で自動計算します。<br>
       参考：厚生労働省は生活習慣病のリスクを高める量を、1日あたり男性40g・女性20g以上としています。</p>
     <button class="ghost" id="resetLevels">既定値に戻す</button>
 
@@ -567,6 +616,7 @@ async function applyLevelSettings() {
   const slight = num($('#sSlight').value, 40);
   const over = num($('#sOver').value, 60);
   const rest = Math.round(num($('#sRest').value, 15));
+  const targetRaw = $('#sTarget').value.trim();
 
   if (!(mod > 0 && slight > mod && over > slight)) {
     toast('適量 < やや飲み過ぎ < 飲み過ぎ の順になるように入力してください');
@@ -575,6 +625,7 @@ async function applyLevelSettings() {
   }
   state.settings.levels = { moderate: mod, slightlyOver: slight, over };
   state.settings.targetRestDays = Math.min(31, Math.max(0, rest));
+  state.settings.monthlyTarget = targetRaw === '' ? null : Math.max(0, num(targetRaw, 0)) || null;
   await saveSettings();
   renderSettings();
   renderCalendar();
@@ -839,7 +890,8 @@ function cleanSettings(s) {
       slightlyOver: slight > moderate ? slight : moderate * 2,
       over: over > Math.max(slight, moderate) ? over : moderate * 3,
     },
-    targetRestDays: Math.min(31, Math.round(posNum(s?.targetRestDays, D.targetRestDays ?? 15))),
+    targetRestDays: Math.min(31, Math.round(posNum(s?.targetRestDays, DEFAULT_SETTINGS.targetRestDays))),
+    monthlyTarget: posNum(s?.monthlyTarget, 0) > 0 ? posNum(s.monthlyTarget, 0) : null,
     schemaVersion: 1,
   };
 }
@@ -991,15 +1043,50 @@ function bind() {
     if (cell) openDay(cell.dataset.date);
   });
 
-  // 左右スワイプで月移動
+  // 左右スワイプで月移動。指の動きにカレンダーを追従させる
   let sx = 0;
   let sy = 0;
+  let axis = null;
   const scroll = $('#calScroll');
-  scroll.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-  scroll.addEventListener('touchend', (e) => {
-    const dx = e.changedTouches[0].clientX - sx;
-    const dy = e.changedTouches[0].clientY - sy;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) moveMonth(dx < 0 ? 1 : -1);
+  const slide = $('#calSlide');
+
+  const settle = (to, dur) => {
+    if (!slide.animate) { slide.style.transform = ''; slide.style.opacity = ''; return; }
+    slide.animate([{ transform: `translateX(${dragX}px)`, opacity: slide.style.opacity || '1' },
+      { transform: `translateX(${to}px)`, opacity: '1' }],
+    { duration: dur, easing: 'cubic-bezier(.32,.72,0,1)' }).onfinish = () => {
+      slide.style.transform = '';
+      slide.style.opacity = '';
+    };
+  };
+
+  scroll.addEventListener('touchstart', (e) => {
+    if (sliding || e.touches.length > 1) return;
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+    axis = null;
+    dragX = 0;
+  }, { passive: true });
+
+  scroll.addEventListener('touchmove', (e) => {
+    if (sliding || e.touches.length > 1) return;
+    const dx = e.touches[0].clientX - sx;
+    const dy = e.touches[0].clientY - sy;
+    if (axis === null) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
+    }
+    if (axis !== 'x') return;
+    dragX = dx * 0.55;                      // 引きずる手応えを残すため減衰させる
+    slide.style.transform = `translateX(${dragX}px)`;
+    slide.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / window.innerWidth));
+  }, { passive: true });
+
+  scroll.addEventListener('touchend', () => {
+    if (sliding || axis !== 'x') return;
+    if (Math.abs(dragX) > 34) moveMonth(dragX < 0 ? 1 : -1, true);
+    else settle(0, 220);
+    axis = null;
   }, { passive: true });
 
   /* --- 日別シート --- */
@@ -1084,6 +1171,7 @@ function bind() {
     if (t.closest('#resetLevels')) {
       state.settings.levels = { ...DEFAULT_SETTINGS.levels };
       state.settings.targetRestDays = DEFAULT_SETTINGS.targetRestDays;
+      state.settings.monthlyTarget = DEFAULT_SETTINGS.monthlyTarget;
       saveSettings().then(() => { renderSettings(); renderCalendar(); toast('既定値に戻しました'); });
       return;
     }
@@ -1108,7 +1196,7 @@ function bind() {
   });
 
   $('#settingsBody').addEventListener('change', (e) => {
-    if (['sMod', 'sSlight', 'sOver', 'sRest'].includes(e.target.id)) applyLevelSettings();
+    if (['sMod', 'sSlight', 'sOver', 'sRest', 'sTarget'].includes(e.target.id)) applyLevelSettings();
   });
 
   $('#importFile').onchange = (e) => {

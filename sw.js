@@ -1,4 +1,4 @@
-const CACHE = 'nomilog-v2';
+const CACHE = 'nomilog-v3';
 const ASSETS = [
   './',
   'index.html',
