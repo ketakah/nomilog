@@ -330,6 +330,11 @@ function renderSummary(y, m, dim) {
 
   const drinkDays = recs.filter((r) => r.totalGrams > 0).length;
 
+  // 今月は今日まで、過去の月は月末まで、先の月は 0 日として割る
+  const now = new Date();
+  const monthDiff = (y - now.getFullYear()) * 12 + (m - now.getMonth());
+  const elapsed = monthDiff > 0 ? 0 : (monthDiff === 0 ? now.getDate() : dim);
+
   $('#summary').innerHTML = `
     <section class="card">
       <h2>今月のまとめ</h2>
@@ -340,7 +345,7 @@ function renderSummary(y, m, dim) {
         ${over ? `目標を ${diff}g 超えています` : `目標まで あと ${diff}g`}</div>
       <div class="stats">${legend}</div>
       <div class="stats avgs">
-        <div><em>平均（月）</em><b>${r1(total / dim)}g</b></div>
+        <div><em>平均（月）</em><b>${elapsed ? r1(total / elapsed) : 0}g</b></div>
         <div><em>平均（飲酒日）</em><b>${drinkDays ? r1(total / drinkDays) : 0}g</b></div>
       </div>
     </section>`;
