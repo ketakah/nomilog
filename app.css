@@ -123,6 +123,8 @@ button { font: inherit; color: inherit; background: none; border: none; }
 .navbtn:active { opacity: .4; }
 #prevMonth { left: 4px; }
 #nextMonth { right: 4px; }
+#prevRange { left: 4px; }
+#nextRange { right: 4px; }
 
 .scroll {
   flex: 1;
@@ -524,6 +526,26 @@ textarea:focus { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------------- グラフ ---------------- */
+
+#statsScroll { overflow-x: hidden; }
+#statsSlide { will-change: transform; touch-action: pan-y; }
+
+.shead { display: flex; gap: 24px; min-height: 58px; }
+.shead .lbl { font-size: 12px; color: var(--text2); }
+.shead .val { font-size: 27px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
+.shead .val span { font-size: 14px; font-weight: 400; color: var(--text2); margin-left: 2px; }
+.srange { font-size: 12px; color: var(--text2); margin-top: 2px; }
+
+.chart { display: block; width: 100%; margin-top: 12px; overflow: visible; }
+.chart .chbar { transition: opacity .12s; }
+.chart .hit { fill: transparent; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 5px 13px; font-size: 11px; color: var(--text2); margin-top: 10px; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+
+.empty { padding: 34px 0; text-align: center; color: var(--text2); font-size: 14px; }
 
 /* ---------------- 起動失敗 ---------------- */
 

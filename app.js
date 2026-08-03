@@ -272,6 +272,13 @@ function autoMonthTarget(y, m) {
   return Math.max(0, Math.round(state.settings.levels.moderate * (dim - state.settings.targetRestDays)));
 }
 
+// 今月は今日まで、過去の月は月末まで、先の月は 0 日として数える
+function elapsedInMonth(y, m) {
+  const now = new Date();
+  const diff = (y - now.getFullYear()) * 12 + (m - now.getMonth());
+  return diff > 0 ? 0 : (diff === 0 ? now.getDate() : new Date(y, m + 1, 0).getDate());
+}
+
 function monthTarget(y, m) {
   const fixed = state.settings.monthlyTarget;
   return fixed > 0 ? fixed : autoMonthTarget(y, m);
@@ -329,11 +336,7 @@ function renderSummary(y, m, dim) {
     .join('');
 
   const drinkDays = recs.filter((r) => r.totalGrams > 0).length;
-
-  // 今月は今日まで、過去の月は月末まで、先の月は 0 日として割る
-  const now = new Date();
-  const monthDiff = (y - now.getFullYear()) * 12 + (m - now.getMonth());
-  const elapsed = monthDiff > 0 ? 0 : (monthDiff === 0 ? now.getDate() : dim);
+  const elapsed = elapsedInMonth(y, m);
 
   $('#summary').innerHTML = `
     <section class="card">
@@ -354,21 +357,15 @@ function renderSummary(y, m, dim) {
 let sliding = false;
 let dragX = 0;
 
-function moveMonth(delta, fromDrag = false) {
+// 月やグラフの期間を切り替えるときの横スライド。出ていく向きと入ってくる向きをそろえる
+function slideSwap(el, delta, swap, fromDrag) {
   if (sliding) return;
-  const el = $('#calSlide');
-  const swap = () => {
-    state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + delta, 1);
-    renderCalendar();
-  };
   if (!el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) {
     el.style.transform = '';
     el.style.opacity = '';
     swap();
     return;
   }
-
-  // 出ていく方向と入ってくる方向をそろえて、指の動きの続きに見せる
   const shift = Math.min(window.innerWidth, 520) * 0.3;
   const from = { transform: `translateX(${fromDrag ? dragX : 0}px)`, opacity: el.style.opacity || '1' };
   sliding = true;
@@ -385,6 +382,13 @@ function moveMonth(delta, fromDrag = false) {
       sliding = false;
     };
   };
+}
+
+function moveMonth(delta, fromDrag = false) {
+  slideSwap($('#calSlide'), delta, () => {
+    state.cursor = new Date(state.cursor.getFullYear(), state.cursor.getMonth() + delta, 1);
+    renderCalendar();
+  }, fromDrag);
 }
 
 function goMonth(y, m) {
@@ -420,6 +424,213 @@ function openMonthPicker() {
   pickerYear = state.cursor.getFullYear();
   renderMonthPicker();
   openSheet($('#monthSheet'));
+}
+
+/* ============================================================
+   グラフ
+   ============================================================ */
+
+const stats = { range: 'month', metric: 'grams', cursor: new Date(), sel: null };
+
+const CH_W = 320;
+const CH_H = 150;
+const CH_PAD = 34;              // 右端の目盛りラベル用
+const RANGE_STEP = { month: 1, half: 6, year: 12 };
+
+/* 期間を「棒1本ぶん」の単位に割る。prefix で state.days を引き当てる */
+function statsBuckets() {
+  const y = stats.cursor.getFullYear();
+  const m = stats.cursor.getMonth();
+
+  if (stats.range === 'month') {
+    const dim = new Date(y, m + 1, 0).getDate();
+    return {
+      title: `${y}年${m + 1}月`,
+      sub: `${y}年${m + 1}月1日〜${m + 1}月${dim}日`,
+      elapsed: elapsedInMonth(y, m),
+      items: Array.from({ length: dim }, (_, i) => ({
+        prefix: `${y}-${pad(m + 1)}-${pad(i + 1)}`,
+        name: `${m + 1}月${i + 1}日`,
+        label: i % 7 === 0 ? String(i + 1) : '',
+      })),
+    };
+  }
+
+  const n = RANGE_STEP[stats.range];
+  const items = [];
+  let elapsed = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(y, m - i, 1);
+    const yy = d.getFullYear();
+    const mm = d.getMonth();
+    elapsed += elapsedInMonth(yy, mm);
+    items.push({
+      prefix: `${yy}-${pad(mm + 1)}`,
+      name: `${yy}年${mm + 1}月`,
+      label: n === 6 || i % 2 === 1 ? `${mm + 1}月` : '',
+    });
+  }
+  const first = new Date(y, m - n + 1, 1);
+  return {
+    title: `${y}年${m + 1}月まで`,
+    sub: `${first.getFullYear()}年${first.getMonth() + 1}月〜${y}年${m + 1}月`,
+    elapsed,
+    items,
+  };
+}
+
+/* 記録を1回だけ走査して各棒に集計する */
+function statsTally(items) {
+  const idx = new Map(items.map((b, i) => [b.prefix, i]));
+  const len = items[0].prefix.length;
+  const out = items.map(() => ({ grams: 0, rest: 0, drink: 0, lv: [0, 0, 0, 0, 0] }));
+  for (const r of state.days.values()) {
+    if (!r.status) continue;
+    const i = idx.get(r.date.slice(0, len));
+    if (i === undefined) continue;
+    const o = out[i];
+    o.grams += r.totalGrams;
+    if (r.totalGrams > 0) o.drink += 1; else o.rest += 1;
+    o.lv[levelOf(r.totalGrams)] += 1;
+  }
+  return out;
+}
+
+function niceMax(v, unit) {
+  if (v <= 0) return 1;
+  if (unit === '日') return Math.max(2, Math.ceil(v / 2) * 2);   // 半分の目盛りも整数になるように
+  const e = 10 ** Math.floor(Math.log10(v));
+  return Math.ceil(v / e * 2) / 2 * e;
+}
+
+function chartFrame(max, unit) {
+  return [0, 0.5, 1].map((f) => {
+    const yy = CH_H - f * CH_H;
+    return `<line x1="0" y1="${yy}" x2="${CH_W - CH_PAD}" y2="${yy}" stroke="var(--grid)"
+        stroke-width="1" ${f ? 'stroke-dasharray="2 3"' : ''}/>
+      <text x="${CH_W - CH_PAD + 5}" y="${yy + 4}" font-size="10"
+        fill="var(--text2)">${r1(max * f)}${f === 1 ? unit : ''}</text>`;
+  }).join('');
+}
+
+function chartBars(items, tally, max, valueOf, colorOf) {
+  const n = items.length;
+  const gap = (CH_W - CH_PAD) / n;
+  const bw = Math.max(2, gap * (n > 20 ? 0.5 : 0.62));
+  return items.map((b, i) => {
+    const v = valueOf(tally[i]);
+    const h = max ? (v / max) * CH_H : 0;
+    const x = i * gap + (gap - bw) / 2;
+    const dim = stats.sel != null && stats.sel !== i;
+    return `<rect class="chbar" x="${x.toFixed(1)}" y="${(CH_H - h).toFixed(1)}" width="${bw.toFixed(1)}"
+        height="${(v > 0 ? Math.max(h, 1.5) : 0).toFixed(1)}" rx="${Math.min(bw / 2, 2.5).toFixed(1)}"
+        fill="${colorOf(tally[i], i)}" opacity="${dim ? 0.3 : 1}"/>
+      ${b.label ? `<text x="${(x + bw / 2).toFixed(1)}" y="${CH_H + 14}" font-size="10"
+        fill="var(--text2)" text-anchor="middle">${b.label}</text>` : ''}
+      <rect class="hit" data-bar="${i}" x="${(i * gap).toFixed(1)}" y="-6"
+        width="${gap.toFixed(1)}" height="${CH_H + 20}"/>`;
+  }).join('');
+}
+
+function chartStack(items, tally, max) {
+  const n = items.length;
+  const gap = (CH_W - CH_PAD) / n;
+  const bw = Math.max(2, gap * (n > 20 ? 0.5 : 0.62));
+  return items.map((b, i) => {
+    const dim = stats.sel != null && stats.sel !== i;
+    let acc = 0;
+    const segs = tally[i].lv.map((cnt, lv) => {
+      if (!cnt) return '';
+      const h = (cnt / max) * CH_H;
+      acc += h;
+      return `<rect class="chbar" x="${(i * gap + (gap - bw) / 2).toFixed(1)}" y="${(CH_H - acc).toFixed(1)}"
+        width="${bw.toFixed(1)}" height="${h.toFixed(1)}" fill="${levelColor(lv)}"
+        opacity="${dim ? 0.3 : 1}"/>`;
+    }).join('');
+    return `${segs}
+      ${b.label ? `<text x="${(i * gap + gap / 2).toFixed(1)}" y="${CH_H + 14}" font-size="10"
+        fill="var(--text2)" text-anchor="middle">${b.label}</text>` : ''}
+      <rect class="hit" data-bar="${i}" x="${(i * gap).toFixed(1)}" y="-6"
+        width="${gap.toFixed(1)}" height="${CH_H + 20}"/>`;
+  }).join('');
+}
+
+function renderStats() {
+  // 月表示は棒1本が1日なので、レベル別の内訳は意味を持たない
+  const isMonth = stats.range === 'month';
+  if (isMonth && stats.metric === 'mix') stats.metric = 'grams';
+  $('#segMetric').querySelector('[data-metric="mix"]').hidden = isMonth;
+
+  const { title, sub, elapsed, items } = statsBuckets();
+  const tally = statsTally(items);
+
+  $('#rangeTitle').textContent = title;
+  document.querySelectorAll('#segRange button').forEach((b) => b.classList.toggle('is-on', b.dataset.range === stats.range));
+  document.querySelectorAll('#segMetric button').forEach((b) => b.classList.toggle('is-on', b.dataset.metric === stats.metric));
+
+  const total = tally.reduce((s, t) => s + t.grams, 0);
+  const drink = tally.reduce((s, t) => s + t.drink, 0);
+  const rest = tally.reduce((s, t) => s + t.rest, 0);
+  const has = tally.some((t) => t.drink || t.rest);
+
+  // 棒を選んでいるあいだは、その日・その月の値を見出しに出す
+  const t = stats.sel != null ? tally[stats.sel] : null;
+  const head = t
+    ? `<div class="shead"><div>
+        <div class="lbl">${esc(items[stats.sel].name)}</div>
+        <div class="val">${stats.metric === 'grams' ? r1(t.grams) : stats.metric === 'rest' ? t.rest
+          : t.drink + t.rest}<span>${stats.metric === 'grams' ? 'g' : '日'}</span></div>
+        ${stats.metric === 'mix' ? `<div class="srange">${t.lv.map((c, lv) => (c ? `${LEVEL_NAMES[lv]} ${c}日` : '')).filter(Boolean).join('　')}</div>` : ''}
+      </div></div>`
+    : `<div class="shead">
+        <div><div class="lbl">平均（経過日数）</div>
+          <div class="val">${elapsed ? r1(total / elapsed) : 0}<span>g</span></div></div>
+        <div><div class="lbl">平均（飲酒日）</div>
+          <div class="val">${drink ? r1(total / drink) : 0}<span>g</span></div></div>
+      </div>
+      <div class="srange">${esc(sub)}</div>`;
+  $('#statsHead').innerHTML = head;
+
+  if (!has) {
+    $('#chartWrap').innerHTML = '<div class="empty">この期間の記録はありません</div>';
+    $('#chartLegend').innerHTML = '';
+    return;
+  }
+
+  let body;
+  let max;
+  let unit;
+  if (stats.metric === 'grams') {
+    max = niceMax(Math.max(...tally.map((x) => x.grams)), 'g');
+    unit = 'g';
+    body = chartBars(items, tally, max, (x) => x.grams, (x) => levelColor(levelOf(
+      stats.range === 'month' ? x.grams : x.grams / Math.max(1, x.drink + x.rest))));
+  } else if (stats.metric === 'rest') {
+    max = niceMax(Math.max(...tally.map((x) => x.rest)), '日');
+    unit = '日';
+    body = chartBars(items, tally, max, (x) => x.rest, () => 'var(--rest)');
+  } else {
+    max = niceMax(Math.max(...tally.map((x) => x.drink + x.rest)), '日');
+    unit = '日';
+    body = chartStack(items, tally, max);
+  }
+
+  $('#chartWrap').innerHTML = `<svg class="chart" viewBox="0 0 ${CH_W} ${CH_H + 20}">
+    ${chartFrame(max, unit)}${body}</svg>`;
+
+  $('#chartLegend').innerHTML = stats.metric === 'rest'
+    ? `<span><i style="background:var(--rest)"></i>休肝日 合計 ${rest}日</span>`
+    : `<div class="legend">${LEVEL_NAMES.map((nm, lv) =>
+      `<span><i style="background:${levelColor(lv)}"></i>${nm}</span>`).join('')}</div>`;
+}
+
+function moveRange(delta, fromDrag = false) {
+  slideSwap($('#statsSlide'), delta, () => {
+    stats.cursor = new Date(stats.cursor.getFullYear(),
+      stats.cursor.getMonth() + delta * RANGE_STEP[stats.range], 1);
+    stats.sel = null;
+    renderStats();
+  }, fromDrag);
 }
 
 /* ============================================================
@@ -1053,6 +1264,7 @@ function switchTab(name) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('is-active', v.id === `view${name}`));
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t.dataset.tab === name));
   if (name === 'Settings') renderSettings();
+  if (name === 'Stats') renderStats();
 }
 
 function bind() {
@@ -1082,51 +1294,82 @@ function bind() {
     if (cell) openDay(cell.dataset.date);
   });
 
-  // 左右スワイプで月移動。カレンダー部分だけを指の動きに追従させる
-  let sx = 0;
-  let sy = 0;
-  let axis = null;
-  const slide = $('#calSlide');
+  // 左右スワイプで移動。対象だけを指の動きに追従させる
+  const bindDrag = (el, move) => {
+    let sx = 0;
+    let sy = 0;
+    let axis = null;
 
-  const settle = (to, dur) => {
-    if (!slide.animate) { slide.style.transform = ''; slide.style.opacity = ''; return; }
-    slide.animate([{ transform: `translateX(${dragX}px)`, opacity: slide.style.opacity || '1' },
-      { transform: `translateX(${to}px)`, opacity: '1' }],
-    { duration: dur, easing: 'cubic-bezier(.32,.72,0,1)' }).onfinish = () => {
-      slide.style.transform = '';
-      slide.style.opacity = '';
-    };
+    el.addEventListener('touchstart', (e) => {
+      if (sliding || e.touches.length > 1) return;
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      axis = null;
+      dragX = 0;
+    }, { passive: true });
+
+    el.addEventListener('touchmove', (e) => {
+      if (sliding || e.touches.length > 1) return;
+      const dx = e.touches[0].clientX - sx;
+      const dy = e.touches[0].clientY - sy;
+      if (axis === null) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
+      }
+      if (axis !== 'x') return;
+      e.preventDefault();                     // 横に振ったときは縦スクロールさせない
+      dragX = dx * 0.55;                      // 引きずる手応えを残すため減衰させる
+      el.style.transform = `translateX(${dragX}px)`;
+      el.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / window.innerWidth));
+    }, { passive: false });
+
+    el.addEventListener('touchend', () => {
+      if (sliding || axis !== 'x') return;
+      if (Math.abs(dragX) > 34) {
+        move(dragX < 0 ? 1 : -1, true);
+      } else if (el.animate) {
+        el.animate([{ transform: `translateX(${dragX}px)`, opacity: el.style.opacity || '1' },
+          { transform: 'translateX(0)', opacity: '1' }],
+        { duration: 220, easing: 'cubic-bezier(.32,.72,0,1)' }).onfinish = () => {
+          el.style.transform = '';
+          el.style.opacity = '';
+        };
+      } else {
+        el.style.transform = '';
+        el.style.opacity = '';
+      }
+      axis = null;
+    }, { passive: true });
   };
 
-  slide.addEventListener('touchstart', (e) => {
-    if (sliding || e.touches.length > 1) return;
-    sx = e.touches[0].clientX;
-    sy = e.touches[0].clientY;
-    axis = null;
-    dragX = 0;
-  }, { passive: true });
+  bindDrag($('#calSlide'), moveMonth);
+  bindDrag($('#statsSlide'), moveRange);
 
-  slide.addEventListener('touchmove', (e) => {
-    if (sliding || e.touches.length > 1) return;
-    const dx = e.touches[0].clientX - sx;
-    const dy = e.touches[0].clientY - sy;
-    if (axis === null) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
-    }
-    if (axis !== 'x') return;
-    e.preventDefault();                     // 横に振ったときは縦スクロールさせない
-    dragX = dx * 0.55;                      // 引きずる手応えを残すため減衰させる
-    slide.style.transform = `translateX(${dragX}px)`;
-    slide.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / window.innerWidth));
-  }, { passive: false });
+  /* --- グラフ --- */
+  $('#prevRange').onclick = () => moveRange(-1);
+  $('#nextRange').onclick = () => moveRange(1);
 
-  slide.addEventListener('touchend', () => {
-    if (sliding || axis !== 'x') return;
-    if (Math.abs(dragX) > 34) moveMonth(dragX < 0 ? 1 : -1, true);
-    else settle(0, 220);
-    axis = null;
-  }, { passive: true });
+  $('#segRange').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-range]');
+    if (!b) return;
+    stats.range = b.dataset.range;
+    stats.sel = null;
+    renderStats();
+  });
+
+  $('#segMetric').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-metric]');
+    if (!b) return;
+    stats.metric = b.dataset.metric;
+    renderStats();
+  });
+
+  $('#chartWrap').addEventListener('click', (e) => {
+    const hit = e.target.closest('[data-bar]');
+    const i = hit ? Number(hit.dataset.bar) : null;
+    stats.sel = stats.sel === i ? null : i;
+    renderStats();
+  });
 
   /* --- 日別シート --- */
   $('#daySheetClose').onclick = () => {
