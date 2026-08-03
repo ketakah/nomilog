@@ -216,6 +216,7 @@ button { font: inherit; color: inherit; background: none; border: none; }
 .stats em { font-style: normal; color: var(--text2); font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .stats em i { display: flex; line-height: 0; flex: none; }
 .stats b { font-weight: 600; white-space: nowrap; }
+.stats.avgs { margin-top: 10px; padding-top: 10px; border-top: .5px solid var(--sep); }
 
 /* ---------------- タブバー ---------------- */
 

@@ -328,6 +328,8 @@ function renderSummary(y, m, dim) {
     .map(([lv, g]) => `<div><em><i>${levelIcon(lv, g, 18)}</i>${LEVEL_NAMES[lv]}</em><b>${count(lv)}日</b></div>`)
     .join('');
 
+  const drinkDays = recs.filter((r) => r.totalGrams > 0).length;
+
   $('#summary').innerHTML = `
     <section class="card">
       <h2>今月のまとめ</h2>
@@ -337,6 +339,10 @@ function renderSummary(y, m, dim) {
       <div class="goal" style="color:${over ? 'var(--lv3)' : 'var(--text2)'}">
         ${over ? `目標を ${diff}g 超えています` : `目標まで あと ${diff}g`}</div>
       <div class="stats">${legend}</div>
+      <div class="stats avgs">
+        <div><em>平均（月）</em><b>${r1(total / dim)}g</b></div>
+        <div><em>平均（飲酒日）</em><b>${drinkDays ? r1(total / drinkDays) : 0}g</b></div>
+      </div>
     </section>`;
 }
 
