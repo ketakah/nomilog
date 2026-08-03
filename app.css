@@ -135,13 +135,12 @@ button { font: inherit; color: inherit; background: none; border: none; }
 #settingsBody { padding-left: 14px; padding-right: 14px; }
 #settingsBody > .sechead:first-child { margin-top: 16px; }
 
-/* 月を切り替えるときここごと横に動かす */
-#calScroll { overflow-x: hidden; }
-#calSlide { will-change: transform; }
-
 /* ---------------- カレンダー ---------------- */
 
-.calpanel { background: var(--panel); border-bottom: .5px solid var(--sep); }
+.calpanel { background: var(--panel); border-bottom: .5px solid var(--sep); overflow: hidden; }
+
+/* 月を切り替えるとき、ここだけをパネルの中で左右に動かす */
+#calSlide { will-change: transform; touch-action: pan-y; }
 
 .wd, .grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 
@@ -523,4 +522,25 @@ textarea:focus { outline: none; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+}
+
+/* ---------------- 起動失敗 ---------------- */
+
+.fatal {
+  padding: calc(var(--top) + 48px) 24px 40px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+.fatal > b { font-size: 20px; display: block; margin-bottom: 16px; }
+.fatal p { margin-bottom: 14px; }
+.fatal .warn { color: var(--lv3); font-weight: 600; }
+.fatal button {
+  margin-top: 10px;
+  padding: 13px 22px;
+  border: none;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
 }

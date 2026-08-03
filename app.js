@@ -149,7 +149,17 @@ const MEMO_ICON = `<span class="memo" aria-label="メモあり">
 const DB_NAME = 'nomilog';
 const DB_VER = 1;
 const STORES = { meta: 'key', categories: 'id', presets: 'id', days: 'date' };
+const DAY_COUNT_KEY = 'nomilog:dayCount';
 let db = null;
+
+// IndexedDB とは別の場所に件数だけ控え、読み込み失敗を空データと区別する
+function rememberDayCount() {
+  try { localStorage.setItem(DAY_COUNT_KEY, String(state.days.size)); } catch { /* 使えなくても支障はない */ }
+}
+
+function expectedDayCount() {
+  try { return Number(localStorage.getItem(DAY_COUNT_KEY)) || 0; } catch { return 0; }
+}
 
 function openDB() {
   return new Promise((res, rej) => {
@@ -231,9 +241,24 @@ async function loadAll() {
 
   state.cats = (await idb('categories', 'readonly', (o) => o.getAll())).sort((a, b) => a.order - b.order);
   state.presets = await idb('presets', 'readonly', (o) => o.getAll());
-  const days = await idb('days', 'readonly', (o) => o.getAll());
+
+  let days = await idb('days', 'readonly', (o) => o.getAll());
+  // iOS ではアプリ更新直後の再読み込みで IndexedDB が一時的に空を返すことがある。
+  // 前回の件数と食い違ったら、DB を開き直して読み直す。
+  if (!days.length && expectedDayCount() > 0) {
+    db.close();
+    db = await openDB();
+    days = await idb('days', 'readonly', (o) => o.getAll());
+  }
+  if (!days.length && expectedDayCount() > 0) {
+    const err = new Error('STORAGE_STALE');
+    err.expected = expectedDayCount();
+    throw err;
+  }
+
   state.days = new Map(days.map((d) => [d.date, d]));
   state.activeCat = state.cats[0]?.id ?? null;
+  rememberDayCount();
 }
 
 const saveSettings = () => idb('meta', 'readwrite', (o) => o.put(state.settings));
@@ -523,6 +548,7 @@ async function saveDay() {
 
   await idb('days', 'readwrite', (o) => o.put(rec));
   state.days.set(rec.date, rec);
+  rememberDayCount();
   closeSheet($('#daySheet'));
   renderCalendar();
   toast('保存しました');
@@ -532,6 +558,7 @@ async function deleteDay() {
   if (!confirm('この日の記録を削除します。よろしいですか？')) return;
   await idb('days', 'readwrite', (o) => o.delete(draft.date));
   state.days.delete(draft.date);
+  rememberDayCount();
   closeSheet($('#daySheet'));
   renderCalendar();
   toast('削除しました');
@@ -990,6 +1017,7 @@ async function importFile(file) {
 
   await idbBulk('days', days);
   days.forEach((d) => state.days.set(d.date, d));
+  rememberDayCount();
 
   renderCalendar();
   renderSettings();
@@ -1043,11 +1071,10 @@ function bind() {
     if (cell) openDay(cell.dataset.date);
   });
 
-  // 左右スワイプで月移動。指の動きにカレンダーを追従させる
+  // 左右スワイプで月移動。カレンダー部分だけを指の動きに追従させる
   let sx = 0;
   let sy = 0;
   let axis = null;
-  const scroll = $('#calScroll');
   const slide = $('#calSlide');
 
   const settle = (to, dur) => {
@@ -1060,7 +1087,7 @@ function bind() {
     };
   };
 
-  scroll.addEventListener('touchstart', (e) => {
+  slide.addEventListener('touchstart', (e) => {
     if (sliding || e.touches.length > 1) return;
     sx = e.touches[0].clientX;
     sy = e.touches[0].clientY;
@@ -1068,7 +1095,7 @@ function bind() {
     dragX = 0;
   }, { passive: true });
 
-  scroll.addEventListener('touchmove', (e) => {
+  slide.addEventListener('touchmove', (e) => {
     if (sliding || e.touches.length > 1) return;
     const dx = e.touches[0].clientX - sx;
     const dy = e.touches[0].clientY - sy;
@@ -1077,12 +1104,13 @@ function bind() {
       axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
     }
     if (axis !== 'x') return;
+    e.preventDefault();                     // 横に振ったときは縦スクロールさせない
     dragX = dx * 0.55;                      // 引きずる手応えを残すため減衰させる
     slide.style.transform = `translateX(${dragX}px)`;
-    slide.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / window.innerWidth));
-  }, { passive: true });
+    slide.style.opacity = String(Math.max(0.55, 1 - Math.abs(dx) / window.innerWidth));
+  }, { passive: false });
 
-  scroll.addEventListener('touchend', () => {
+  slide.addEventListener('touchend', () => {
     if (sliding || axis !== 'x') return;
     if (Math.abs(dragX) > 34) moveMonth(dragX < 0 ? 1 : -1, true);
     else settle(0, 220);
@@ -1232,6 +1260,8 @@ async function start() {
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (reloading) return;
       reloading = true;
+      // 接続を残したまま再読み込みすると iOS がデータを開けなくなることがある
+      try { db?.close(); } catch { /* 閉じられなくても再読み込みは行う */ }
       location.reload();
     });
 
@@ -1249,6 +1279,16 @@ async function start() {
 }
 
 start().catch((e) => {
-  document.body.innerHTML = `<div style="padding:40px 24px;font:16px/1.7 system-ui">
-    <b>起動できませんでした</b><br><br>${esc(e.message)}</div>`;
+  const stale = e.message === 'STORAGE_STALE';
+  document.body.innerHTML = `<div class="fatal">
+    <b>${stale ? '記録を読み込めませんでした' : '起動できませんでした'}</b>
+    ${stale ? `
+      <p><b>データは消えていません。</b>${esc(e.expected)} 日分の記録は iPhone の中に残っています。</p>
+      <p>アプリを更新した直後に、iPhone がデータをうまく開けなくなることがあります。
+        下から上にスワイプしてアプリを一度終了し、開き直してください。</p>
+      <p class="warn">この画面が出ているあいだは、記録の追加や読み込みをしないでください。</p>`
+    : `<p>${esc(e.message)}</p>`}
+    <button id="retry">もう一度試す</button>
+  </div>`;
+  $('#retry').onclick = () => location.reload();
 });
