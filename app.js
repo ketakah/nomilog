@@ -134,6 +134,11 @@ function levelIcon(lv, g, size = 20) {
   return ringSvg(size, pct, c, EYES_OPEN(c) + MOUTH[MOUTH_BY_LEVEL[lv]](c));
 }
 
+// 連続休肝日の目印。休肝日と同じティールで揃える
+const STREAK_ICON = (size) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">
+  <path d="M12.7 2.1c3.5 3.7 5.7 6.8 5.7 10.1a6.4 6.4 0 0 1-12.8 0c0-1.8.6-3.4 1.7-5
+    .4 1.1 1.1 1.8 2.1 2.2-.5-2.8.5-5.6 3.3-7.3Z" fill="var(--rest)"/></svg>`;
+
 const MEMO_ICON = `<span class="memo" aria-label="メモあり">
   <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
     <path d="M3.4 2.4h17.2v12.2L14.2 21H3.4Z" fill="none" stroke="currentColor"
@@ -279,6 +284,39 @@ function elapsedInMonth(y, m) {
   return diff > 0 ? 0 : (diff === 0 ? now.getDate() : new Date(y, m + 1, 0).getDate());
 }
 
+const isRestDay = (key) => {
+  const r = state.days.get(key);
+  return !!r && r.totalGrams === 0;
+};
+
+/* その月にかかる休肝日の連続のうち、最長のものを数える。
+   前月から続いていれば実際の開始日まで遡り、その月の時点（今月は今日）で打ち切る。
+   未記録の日は連続を切る。 */
+function restStreak(y, m) {
+  const last = elapsedInMonth(y, m);
+  if (!last) return 0;
+
+  // 月初の前日から遡って、持ち越している日数を数える
+  let carry = 0;
+  const d = new Date(y, m, 0);
+  while (carry < 400 && isRestDay(ymd(d))) {
+    carry += 1;
+    d.setDate(d.getDate() - 1);
+  }
+
+  let run = carry;
+  let best = 0;
+  for (let i = 1; i <= last; i++) {
+    if (isRestDay(`${y}-${pad(m + 1)}-${pad(i)}`)) {
+      run += 1;
+      if (run > best) best = run;
+    } else {
+      run = 0;      // 持ち越し分もここで捨てる（その連続はこの月に届いていない）
+    }
+  }
+  return best;
+}
+
 function monthTarget(y, m) {
   const fixed = state.settings.monthlyTarget;
   return fixed > 0 ? fixed : autoMonthTarget(y, m);
@@ -333,7 +371,8 @@ function renderSummary(y, m, dim) {
   // アイコンを添えてカレンダーの凡例も兼ねる
   const legend = [[0, 0], [1, L.moderate], [2, L.slightlyOver], [3, L.over], [4, 0]]
     .map(([lv, g]) => `<div><em><i>${levelIcon(lv, g, 18)}</i>${LEVEL_NAMES[lv]}</em><b>${count(lv)}日</b></div>`)
-    .join('');
+    .join('')
+    + `<div><em><i>${STREAK_ICON(18)}</i>連続休肝日</em><b>${restStreak(y, m)}日</b></div>`;
 
   const drinkDays = recs.filter((r) => r.totalGrams > 0).length;
   const elapsed = elapsedInMonth(y, m);
