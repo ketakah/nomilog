@@ -545,7 +545,7 @@ textarea:focus { outline: none; }
 .legend { display: flex; flex-wrap: wrap; gap: 5px 13px; font-size: 11px; color: var(--text2); margin-top: 10px; }
 .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
 
-.empty { padding: 34px 0; text-align: center; color: var(--text2); font-size: 14px; }
+.chart-empty { padding: 34px 0; text-align: center; color: var(--text2); font-size: 14px; }
 
 /* ---------------- 起動失敗 ---------------- */
 

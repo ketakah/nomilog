@@ -631,7 +631,7 @@ function renderStats() {
   $('#statsHead').innerHTML = head;
 
   if (!has) {
-    $('#chartWrap').innerHTML = '<div class="empty">この期間の記録はありません</div>';
+    $('#chartWrap').innerHTML = '<div class="chart-empty">この期間の記録はありません</div>';
     $('#chartLegend').innerHTML = '';
     return;
   }
